@@ -1,6 +1,8 @@
 ## 说明
 四天打造企业私有化前端监控系统课程代码，内容齐全作为参考。
-在线课程：[四天打造企业私有化前端监控系统](https://study.163.com/course/courseMain.htm?courseId=1209759805&share=2&shareId=400000000351011)
+在线课程：
+- [云课堂-四天打造企业私有化前端监控系统](https://study.163.com/course/courseMain.htm?courseId=1209759805&share=2&shareId=400000000351011)
+- [思否课堂-四天打造企业私有化前端监控系统](https://segmentfault.com/ls/1650000022010770?r=bPrrH2)
 
 ### FMP采集
 ```
