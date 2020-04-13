@@ -5,3 +5,17 @@
 export const formatTime = (time) => {
     return `${time}`.split(".")[0]
 }
+
+export function getShortUrl(url, MaxUrlLength = 2000) {
+    if (!url) {
+        return '';
+    }
+    if (url.length < MaxUrlLength) {
+        return url;
+    }
+    return url.substr(0, 2000) + '...';
+}
+
+export function isCumtomData(t2) {
+    return t2 == 'custom';
+}
