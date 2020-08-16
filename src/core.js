@@ -1,5 +1,5 @@
-import sendTracker from './util/tracker'
-import onload from './util/onload'
+import sendTracker from './utils/tracker'
+import onload from './utils/onload'
 import { watchPageVisiblityChange } from './utils/visibilityChange';
 import { isCumtomData } from './utils/util';
 
@@ -9,13 +9,15 @@ FEDLOG.logger = FEDLOG.logger || new sendTracker();
 // 发送队列
 FEDLOG.queue = [];
 
+if (window.performance && performance.timing && performance.timing.navigationStart) {
+    FEDLOG.navigationStart = performance.timing.navigationStart
+}
+
 //扩展参数
 let getExtraData = () => ({
     ti: document.title.replace(/(^\s+)|(\s+$)/g, ""),
     url: location.href,
-    ts: Date.now(),
-    user: userId + '@' + userName,
-    env
+    ts: Date.now()
 });
 
 const MAX_Queue_Size = 100;

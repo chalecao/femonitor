@@ -1,4 +1,4 @@
-import parseResponse from '../util/parseResponse';
+import parseResponse from '../utils/parseResponse';
 
 /**
  * hack Fetch

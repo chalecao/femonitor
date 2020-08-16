@@ -14,8 +14,8 @@ function createHttpRequest() {
 
 // const host = 'cn-hangzhou-intranet.log.aliyuncs.com' //阿里云内网地址不消耗外网流量
 const host = 'cn-hangzhou.log.aliyuncs.com'
-const project = 'fed123-test' // sls上保持唯一
-const logstore = 'fed123-test'
+const project = 'fed123-test-project' // sls上保持唯一
+const logstore = 'fed123-test-logstore'
 
 /**
  * 连不上外网时需要服务端做转发， FEDLOGs是sls 日志 project name

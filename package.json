@@ -4,7 +4,8 @@
   "description": "四天打造企业私有前端监控系统课程代码，内容齐全作为参考。",
   "main": "index.js",
   "scripts": {
-    "start": "min-http ."
+    "start": "min-http .",
+    "build": "rollup -c rollup.config.js"
   },
   "repository": {
     "type": "git",
