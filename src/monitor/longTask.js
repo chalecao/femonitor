@@ -2,6 +2,7 @@
  * 卡顿，监控浏览器主进程持续执行时间大于50ms的情况 
  * https://www.w3.org/TR/longtasks/
  * https://www.chromestatus.com/features/5738471184400384
+ * tti 参考：https://web.dev/tti/
  * env: chrome>=58
  */
 import getLastAction from '../utils/getLastAction'
@@ -10,15 +11,27 @@ import requestIdleCallback from '../utils/requestIdleCallback'
 import { watchPageVisiblityChange } from '../utils/visibilityChange'
 import { formatTime } from '../utils/util';
 
-const MAX_LONG_TASK_PER_PAGE = 50
+const MAX_LONG_TASK_PER_PAGE = 100;
+const MIN_LONG_TASK_DURATION = 500;
+const TTI_QUITE_WINDOW = 3000;
 FEDLOG.longTask = function () {
     if (!window.PerformanceLongTaskTiming) {
         return;
     }
     FEDLOG._lastLongtaskSelList = []
+    var timmer, mileage = performance.now();
     var observer = new PerformanceObserver((list) => {
         list.getEntries().forEach(entry => {
-            if (entry.duration > 100 && FEDLOG._lastLongtaskSelList.length < MAX_LONG_TASK_PER_PAGE) {
+
+            // 最后一次出现longtask时间记做tti
+            mileage = performance.now()
+            clearTimeout(timmer);
+            timmer = setTimeout(() => {
+                window.FEDLOG_TTI = mileage;
+            }, TTI_QUITE_WINDOW);
+
+            if (entry.duration > MIN_LONG_TASK_DURATION
+                && FEDLOG._lastLongtaskSelList.length < MAX_LONG_TASK_PER_PAGE) {
                 let e = getLastAction();
                 requestIdleCallback(() => {
                     // 最后操作的节点的CSS选择器
@@ -41,6 +54,10 @@ FEDLOG.longTask = function () {
             observer.disconnect();
         }
     });
+
+    setTimeout(() => {
+        window.FEDLOG_TTI = mileage;
+    }, TTI_QUITE_WINDOW * 7)
 
     observer.observe({ entryTypes: ["longtask"] });
 

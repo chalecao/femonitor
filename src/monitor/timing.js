@@ -4,14 +4,14 @@ import { watchPageVisiblityChange } from '../utils/visibilityChange'
 
 /**
  * performance.timing 
-DNS查询耗时: domainLookupEnd - domainLookupStart
+d5 - DNS查询耗时: domainLookupEnd - domainLookupStart
 t3 - TCP建连耗时: connectEnd - connectStart
 d1 - Request请求耗时: responseStart - requestStart
 d2 - Response响应耗时: responseEnd - responseStart
-d3 - DOM解析渲染耗时:（双击可下钻查看细分阶段耗时）domComplete(loadEventStart) - domLoading
-DOM解析耗时: domComplete(loadEventStart) - domContentLoaded
-d4: domready事件回调耗时: domContentLoadedEventEnd-domContentLoadedEventStart
-d5: onload时间: loadEventStart-fetchStart
+d3 - DOM解析渲染耗时:（双击可下钻查看细分阶段耗时）domContentLoadedEventEnd - domLoading
+d4 - DOM解析耗时: loadEventStart（domComplete） - domContentLoadedEventEnd
+// domready事件回调耗时: domContentLoadedEventEnd-domContentLoadedEventStart
+// onload时间: loadEventStart-fetchStart
 
 element timing: https://chromestatus.com/features/6230814637424640, env: chrome>= 77
 first-input: https://www.chromestatus.com/features/5149663191629824, env: chrome>= 77
@@ -55,7 +55,6 @@ FEDLOG.timing = function () {
                         t3: 'fid',
                         d1: FID ? formatTime(FID) : 0,
                         d2: FIDU ? formatTime(FIDU) : 0,
-                        d3: firstInput.startTime
                     });
                 }
             }
@@ -65,35 +64,49 @@ FEDLOG.timing = function () {
         }).observe({ entryTypes: ['first-input'] });
     } catch (e) { }
     if (this.navigationStart) {
-        onload(function () {
+        let hasSendTiming = 0;
+        const timingTimer = function () {
             let fcpTimer = setTimeout(function () {
-                const { fetchStart, connectEnd, connectStart, requestStart, responseEnd, responseStart,
-                    loadEventStart, domLoading, domContentLoadedEventEnd,
-                    domContentLoadedEventStart } = performance.timing
-                FEDLOG.send({
-                    t1: 'exp',
-                    t2: 'timing',
-                    t3: connectEnd - connectStart,
-                    d1: responseStart - requestStart,
-                    d2: responseEnd - responseStart,
-                    d3: loadEventStart - domLoading,
-                    d4: domContentLoadedEventEnd - domContentLoadedEventStart,
-                    d5: loadEventStart - fetchStart
-                });
+                const { fetchStart, connectStart, requestStart, responseEnd, responseStart,
+                    loadEventStart, domLoading, domContentLoadedEventStart } = performance.timing
+                if (!hasSendTiming && domContentLoadedEventStart) {
+                    hasSendTiming = 1;
+                    FEDLOG.send({
+                        t1: 'exp',
+                        t2: 'timing',
+                        t3: requestStart - connectStart,  // tcp时间
+                        d1: responseStart - requestStart,//请求时间
+                        d2: responseEnd - responseStart, //响应时间
+                        d3: domContentLoadedEventStart - domLoading,//DOM加载
+                        d4: loadEventStart - domContentLoadedEventStart,//DOM渲染
+                        d5: connectStart - fetchStart // Appcache + DNS时间
+                    });
+                }
 
                 const FP = performance.getEntriesByName('first-paint')[0]
                 const FCP = performance.getEntriesByName('first-contentful-paint')[0]
 
-                FEDLOG.send({
-                    t1: 'exp',
-                    t2: 'fp',
-                    d1: FP ? formatTime(FP.startTime) : 0,
-                    d2: FCP ? formatTime(FCP.startTime) : 0,
-                    d3: FMP ? formatTime(FMP.startTime) : 0
-                });
+                if (window.FEDLOG_TTI) {
+                    const FCPTime = FCP ? formatTime(FCP.startTime) : 0;
+                    const FMPTime = FMP ? formatTime(FMP.startTime) : (window.FEDLOG_FMP || 0);
+                    const TTITime = formatTime(window.FEDLOG_TTI > FCPTime ? window.FEDLOG_TTI : FCPTime) || FCPTime
 
-                clearTimeout(fcpTimer)
+                    FEDLOG.send({
+                        t1: 'exp',
+                        t2: 'fp',
+                        t3: location.pathname.split("/")[1],
+                        d1: FP ? formatTime(FP.startTime) : 0,
+                        d2: FCPTime,
+                        d3: FMPTime,
+                        d4: TTITime
+                    });
+                    clearTimeout(fcpTimer)
+                } else {
+                    timingTimer()
+                }
+
             }, 3e3);
-        })
+        }
+        onload(timingTimer)
     }
 }
