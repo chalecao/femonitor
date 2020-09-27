@@ -25,7 +25,8 @@ const logstore = 'fed123-test-logstore'
   */
 function sendTracker() {
     this.path_ = '/logstores/' + logstore + '/track?APIVersion=0.6.0';
-    this.uri_ = 'http://' + project + '.' + host + this.path_;
+    this.slsUrl = 'http://' + project + '.' + host + this.path_;
+    this.uri_ = this.slsUrl;
     this.params_ = new Array();
     this.httpRequest_ = createHttpRequest();
     this.httpRequest_.timeout = 3000;
@@ -42,9 +43,16 @@ sendTracker.prototype = {
         this.params_.push(key);
         this.params_.push(value);
     },
+    switchUrl: function () {
+        if (this.uri_ == this.slsUrl) {
+            this.uri_ = this.path_;
+        } else {
+            this.uri_ = this.slsUrl
+        }
+    },
     checkNetWork: function () {
         this.httpRequest_.onerror = (event) => {
-            this.uri_ = this.path_;
+            this.switchUrl();
         }
         this.httpRequest_.open("OPTIONS", this.uri_, true);
         this.httpRequest_.send(null);
@@ -66,7 +74,12 @@ sendTracker.prototype = {
         try {
             this.httpRequest_.open("GET", url, true);
             this.httpRequest_.onerror = (event) => {
-                this.uri_ = this.path_;
+                this.switchUrl();
+                errCb && errCb();
+            }
+            this.httpRequest_.ontimeout = (event) => {
+                this.switchUrl();
+                errCb && errCb();
             }
             this.httpRequest_.onload = function () {
                 if ((this.status >= 200 && this.status <= 300) || this.status == 304) {
@@ -83,7 +96,7 @@ sendTracker.prototype = {
         }
 
     },
-    loggerp: function (data, cb) {
+    loggerp: function (data, cb, errorcb) {
         if (window.FEDLOG_DISABLE_TRACK) return;
 
         var url = this.uri_;
@@ -96,14 +109,22 @@ sendTracker.prototype = {
             this.httpRequest_.setRequestHeader('x-log-apiversion', '0.6.0');
             this.httpRequest_.setRequestHeader('x-log-bodyrawsize', body.length);
             this.httpRequest_.onerror = (event) => {
-                this.uri_ = this.path_;
+                this.switchUrl();
+                errCb && errCb();
             }
+            this.httpRequest_.ontimeout = (event) => {
+                this.switchUrl();
+                errCb && errCb();
+            }
+            let _self = this;
             this.httpRequest_.onload = function () {              //监听数据状态并接收后台响应
                 if ((this.status >= 200 && this.status <= 300) || this.status == 304) {
                     //成功了，可以得到数据了
                     cb && cb()
                 } else {
                     //失败了
+                    _self.switchUrl();
+                    errorcb && errorcb()
                 }
             }
             this.httpRequest_.send(body);

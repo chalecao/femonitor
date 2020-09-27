@@ -29,7 +29,8 @@
       var _this = this;
 
       this.path_ = '/logstores/' + logstore + '/track?APIVersion=0.6.0';
-      this.uri_ = 'http://' + project + '.' + host + this.path_;
+      this.slsUrl = 'http://' + project + '.' + host + this.path_;
+      this.uri_ = this.slsUrl;
       this.params_ = new Array();
       this.httpRequest_ = createHttpRequest();
       this.httpRequest_.timeout = 3000;
@@ -45,11 +46,18 @@
           this.params_.push(key);
           this.params_.push(value);
       },
+      switchUrl: function switchUrl() {
+          if (this.uri_ == this.slsUrl) {
+              this.uri_ = this.path_;
+          } else {
+              this.uri_ = this.slsUrl;
+          }
+      },
       checkNetWork: function checkNetWork() {
           var _this2 = this;
 
           this.httpRequest_.onerror = function (event) {
-              _this2.uri_ = _this2.path_;
+              _this2.switchUrl();
           };
           this.httpRequest_.open("OPTIONS", this.uri_, true);
           this.httpRequest_.send(null);
@@ -74,7 +82,12 @@
           try {
               this.httpRequest_.open("GET", url, true);
               this.httpRequest_.onerror = function (event) {
-                  _this3.uri_ = _this3.path_;
+                  _this3.switchUrl();
+                  errCb && errCb();
+              };
+              this.httpRequest_.ontimeout = function (event) {
+                  _this3.switchUrl();
+                  errCb && errCb();
               };
               this.httpRequest_.onload = function () {
                   if (this.status >= 200 && this.status <= 300 || this.status == 304) {
@@ -89,7 +102,7 @@
               console.log(ex);
           }
       },
-      loggerp: function loggerp(data, cb) {
+      loggerp: function loggerp(data, cb, errorcb) {
           var _this4 = this;
 
           if (window.FEDLOG_DISABLE_TRACK) { return; }
@@ -104,8 +117,14 @@
               this.httpRequest_.setRequestHeader('x-log-apiversion', '0.6.0');
               this.httpRequest_.setRequestHeader('x-log-bodyrawsize', body.length);
               this.httpRequest_.onerror = function (event) {
-                  _this4.uri_ = _this4.path_;
+                  _this4.switchUrl();
+                  errCb && errCb();
               };
+              this.httpRequest_.ontimeout = function (event) {
+                  _this4.switchUrl();
+                  errCb && errCb();
+              };
+              var _self = this;
               this.httpRequest_.onload = function () {
                   //监听数据状态并接收后台响应
                   if (this.status >= 200 && this.status <= 300 || this.status == 304) {
@@ -113,6 +132,8 @@
                       cb && cb();
                   } else {
                       //失败了
+                      _self.switchUrl();
+                      errorcb && errorcb();
                   }
               };
               this.httpRequest_.send(body);
@@ -170,18 +191,6 @@
       }
   };
 
-  /**
-   * performance  的时间3350.304999999935，需要格式化下
-   * @param {*} time 
-   */
-  var formatTime = function formatTime(time) {
-      return ('' + time).split(".")[0];
-  };
-
-  function isCumtomData(t2) {
-      return t2 == 'custom';
-  }
-
   var _extends = Object.assign || function (target) {
     for (var i = 1; i < arguments.length; i++) {
       var source = arguments[i];
@@ -215,47 +224,86 @@
       };
   };
 
-  var MAX_Queue_Size = 100;
-  FEDLOG.send = function (data) {
+  var MAX_Queue_Size = 200;
+  FEDLOG._waitSend = function (data) {
       // 超过100条数据等待, 统计正常业务日志 2.66条/s，5s有15条数据，5倍就是75条，5倍算作数据暴增
-      if (this.queue.length >= MAX_Queue_Size && !isCumtomData(data && data.t2)) {
+      // if (this.queue.length >= MAX_Queue_Size && !isCumtomData(data && data.t2)) {
+      if (this.queue.length >= MAX_Queue_Size) {
           return;
       }
-      var extraData = _extends({}, getExtraData(), data);
 
+      var extraData = _extends({}, getExtraData(), data);
       this.queue.push(extraData);
   };
 
-  FEDLOG._sendAll = function () {
+  FEDLOG._send = function (data) {
       var _this = this;
+
+      if (!data) { return; }
+
+      var extraData = _extends({}, getExtraData(), data);
+      Object.keys(extraData).forEach(function (key) {
+          FEDLOG.logger.push(key, extraData[key]);
+      });
+      // console.log(`FEDLOG ${extraData.t1}-${extraData.t2}:`, `${extraData.d1}`)
+      FEDLOG.logger.logger(function () {
+          _this._waitSend(data);
+      });
+  };
+
+  FEDLOG._sendAll = function (cb, errCb) {
+      var _this2 = this;
 
       if (!this.queue.length) {
           return;
       }
       var temp = {};
       var data = this.queue.map(function (item) {
+          // console.log(`FEDLOG ${item.t1}-${item.t2}:`, `${item.d1}`)
           temp = _extends({}, item);
           Object.keys(temp).forEach(function (k) {
               temp[k] = String(temp[k]);
           });
           return temp;
       });
-      FEDLOG.logger.loggerp(data, function () {
-          _this.queue = [];
-      });
+      if (window.FEDLOG_DISABLE_UPLOAD_LOG) {
+          console.log("FEDLOG_DISABLE_UPLOAD_LOG", data);
+          this.queue = [];
+          cb && cb();
+      } else {
+          FEDLOG.logger.loggerp(data, function () {
+              _this2.queue = [];
+              cb && cb();
+          }, errCb);
+      }
+  };
+
+  var UploadLogTime = 5e3;
+  FEDLOG.uploadLog = function () {
+      var timer = setTimeout(function () {
+          FEDLOG.blank && FEDLOG.blank(); //检查白屏
+          if (FEDLOG.queue.length > 0) {
+              requestIdleCallback(function () {
+                  FEDLOG._sendAll(function () {
+                      UploadLogTime = 5e3;
+                  }, function () {
+                      // 异常
+                      UploadLogTime += 3e3;
+                      // 5次失败异常，清空
+                      if (UploadLogTime > 15e3) {
+                          FEDLOG.queue = [];
+                      }
+                  });
+              });
+          }
+          clearTimeout(timer);
+          FEDLOG.uploadLog();
+      }, UploadLogTime);
   };
 
   //5s检查一下队列
   onload(function () {
-      setInterval(function () {
-          FEDLOG.blank && FEDLOG.blank();
-          if (FEDLOG.queue.length > 0) {
-              window.requestIdleCallback(function () {
-                  FEDLOG._sendAll();
-              });
-          }
-      }, 5e3);
-
+      FEDLOG.uploadLog();
       watchPageVisiblityChange(function (isVisible) {
           if (!isVisible) {
               console.log('leave page send FEDLOG');
@@ -263,6 +311,15 @@
           }
       });
   });
+
+  FEDLOG.send = function (data, isIme) {
+      //埋点发送
+      if (isIme) {
+          this._send(data);
+      } else {
+          this._waitSend(data);
+      }
+  };
 
   var genSelector = function genSelector(path) {
       return path.reverse().filter(function (el) {
@@ -295,6 +352,14 @@
           return genSelector(path);
       }
   }
+
+  /**
+   * performance  的时间3350.304999999935，需要格式化下
+   * @param {*} time 
+   */
+  var formatTime = function formatTime(time) {
+      return ('' + time).split(".")[0];
+  };
 
   var lastActionEvent = void 0;
   ['pointerdown', 'touchstart', 'mousedown', 'keydown', 'mouseover'].forEach(function (event) {
@@ -1031,6 +1096,114 @@
       });
   };
 
+  /**
+  https://wicg.github.io/event-timing/
+   */
+  FEDLOG.fid = function () {
+      try {
+          var entryType = 'first-input';
+          var observer = new PerformanceObserver(function (list, obs) {
+              var firstInput = list.getEntries()[0];
+              if (firstInput) {
+                  // Measure the delay to begin processing the first input event.
+                  var FID = firstInput.processingStart - firstInput.startTime;
+                  // Measure the duration of processing the first input event.
+                  // Only use when the important event handling work is done synchronously in the handlers.
+                  var FIDU = firstInput.duration;
+                  // console.log(FID, FIDU)
+                  if (FID > 50 || FIDU > 50) {
+                      FEDLOG.send({
+                          t1: 'bu',
+                          t2: 'custom',
+                          t3: 'fid',
+                          d1: FID ? formatTime(FID) : 0,
+                          d2: FIDU ? formatTime(FIDU) : 0
+                      });
+                  }
+              }
+              // Disconnect this observer since callback is only triggered once.
+              observer.disconnect();
+              // }).observe({ type: 'first-input', buffered: true }); // chrome 79支持type，chrome 70不支持会报错，要用entryTypes
+          });
+          observer.observe({ entryTypes: [entryType] });
+          watchPageVisiblityChange(function (isVisible) {
+              if (!isVisible && observer) {
+                  observer.disconnect();
+              }
+          });
+      } catch (e) {}
+  };
+
+  /**
+  lcp: https://web.dev/lcp/
+  good | need improvement | poor
+  ----2.5s---------------4.0s----
+   */
+  FEDLOG.lcp = function () {
+      var entryType = 'largest-contentful-paint';
+      var observer = new PerformanceObserver(function (list) {
+          list.getEntries().forEach(function (item) {
+              FEDLOG.send({
+                  t1: 'exp',
+                  t2: 'fe',
+                  t3: 'lcp',
+                  d1: item.startTime,
+                  d2: item.size,
+                  d3: genSelector$1(item.element)
+              });
+          });
+      });
+      observer.observe({ entryTypes: [entryType] });
+      // 这个是加载体验指标，onload后不会再触发，可以释放
+      onload(function () {
+          if (observer) {
+              observer.disconnect();
+          }
+      });
+      watchPageVisiblityChange(function (isVisible) {
+          if (!isVisible && observer) {
+              observer.disconnect();
+          }
+      });
+  };
+
+  /**
+  cls: https://web.dev/cls/
+  good | need improvement | poor
+  ----0.1---------------0.25----
+   */
+  FEDLOG.cls = function () {
+      var entryType = 'layout-shift';
+      var observer = new PerformanceObserver(function (list) {
+          list.getEntries().forEach(function (item) {
+              if (item.sources) {
+                  var d3 = item.sources[0] && genSelector$1(item.sources[0].node);
+                  var d4 = item.sources[1] && genSelector$1(item.sources[1].node);
+                  var d5 = item.sources[2] && genSelector$1(item.sources[2].node);
+                  FEDLOG.send({
+                      t1: 'exp',
+                      t2: 'fe',
+                      t3: 'cls',
+                      d1: item.startTime,
+                      d2: item.value,
+                      d3: d3, d4: d4, d5: d5
+                  });
+              }
+          });
+      });
+      observer.observe({ entryTypes: [entryType] });
+
+      watchPageVisiblityChange(function (isVisible) {
+          if (!isVisible && observer) {
+              observer.disconnect();
+          } else {
+              requestIdleCallback$1(function () {
+                  observer.observe({ entryTypes: [entryType] });
+              }, 50);
+          }
+      });
+  };
+
   FEDLOG.injectJsError();
 
   FEDLOG.injectXhrHook();
@@ -1040,5 +1213,25 @@
   FEDLOG.timing();
 
   FEDLOG.longTask();
+
+  /**
+   * 采样率，默认1
+   * FEDLOG_SAMPLING 全局采样率
+   */
+  window.FEDLOG_SAMPLING_cls = 0.5;
+  window.FEDLOG_SAMPLING_lcp = 0.5;
+  if ("PerformanceObserver" in window) {
+      ['lcp', 'cls'].forEach(function (item) {
+          var sampling = 1;
+          if (window['FEDLOG_SAMPLING_' + item] !== undefined) {
+              sampling = window['FEDLOG_SAMPLING_' + item];
+          } else if (window.FEDLOG_SAMPLING !== undefined) {
+              sampling = FEDLOG_SAMPLING;
+          }
+          if (Math.random() < sampling) {
+              FEDLOG[item]();
+          }
+      });
+  }
 
 }());
