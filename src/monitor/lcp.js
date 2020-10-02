@@ -18,7 +18,7 @@ FEDLOG.lcp = function () {
                 t3: 'lcp',
                 d1: item.startTime,
                 d2: item.size,
-                d3: genSelector(item.element)
+                d3: item.element?genSelector(item.element):''
             });
         })
     });
