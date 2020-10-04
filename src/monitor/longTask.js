@@ -14,11 +14,14 @@ import { formatTime } from '../utils/util';
 const MAX_LONG_TASK_PER_PAGE = 100;
 const MIN_LONG_TASK_DURATION = 500;
 const TTI_QUITE_WINDOW = 3000;
+const TBT_BASE = 50;
 FEDLOG.longTask = function () {
     if (!window.PerformanceLongTaskTiming) {
         return;
     }
     FEDLOG._lastLongtaskSelList = []
+    window.FEDLOG_TBT = 0
+
     var timmer, mileage = performance.now();
     var observer = new PerformanceObserver((list) => {
         list.getEntries().forEach(entry => {
@@ -28,6 +31,9 @@ FEDLOG.longTask = function () {
             clearTimeout(timmer);
             timmer = setTimeout(() => {
                 window.FEDLOG_TTI = mileage;
+                if (entry.duration > TBT_BASE) {
+                    window.FEDLOG_TBT += entry.duration - TBT_BASE
+                }
             }, TTI_QUITE_WINDOW);
 
             if (entry.duration > MIN_LONG_TASK_DURATION

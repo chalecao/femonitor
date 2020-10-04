@@ -5,6 +5,8 @@ import './monitor/fetch'
 import './monitor/pv'
 import './monitor/screenBlank'
 import './monitor/timing'
+import './monitor/fmp'
+import './monitor/fp'
 import './monitor/longTask'
 import './monitor/fid'
 import './monitor/lcp'
@@ -17,6 +19,9 @@ FEDLOG.injectXhrHook();
 FEDLOG.PV();
 
 FEDLOG.timing();
+
+FEDLOG.fmp();
+FEDLOG.fp();
 
 FEDLOG.longTask();
 

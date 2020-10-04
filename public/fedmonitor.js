@@ -912,55 +912,9 @@
   first-paint, env: chrome>= 60
    */
   FEDLOG.timing = function () {
-      var FMP = 0; //<div elementtiming="hero" class="..." >
-      if (!!window.PerformanceElementTiming) {
-          var observer = new PerformanceObserver(function (list) {
-              var perfEntries = list.getEntries();
-              FMP = perfEntries[0];
-              observer.disconnect();
-          });
-          observer.observe({ entryTypes: ['element'] });
-          watchPageVisiblityChange(function (isVisible) {
-              if (!isVisible) {
-                  observer.disconnect();
-              } else {
-                  setTimeout(function () {
-                      observer.observe({ entryTypes: ["element"] });
-                  }, 100);
-              }
-          });
-      }
-
-      // https://wicg.github.io/event-timing/
-      try {
-          new PerformanceObserver(function (list, obs) {
-              var firstInput = list.getEntries()[0];
-              if (firstInput) {
-                  // Measure the delay to begin processing the first input event.
-                  var FID = firstInput.processingStart - firstInput.startTime;
-                  // Measure the duration of processing the first input event.
-                  // Only use when the important event handling work is done synchronously in the handlers.
-                  var FIDU = firstInput.duration;
-                  // console.log(FID, FIDU)
-                  if (FID > 50 || FIDU > 50) {
-                      FEDLOG.send({
-                          t1: 'bu',
-                          t2: 'custom',
-                          t3: 'fid',
-                          d1: FID ? formatTime(FID) : 0,
-                          d2: FIDU ? formatTime(FIDU) : 0
-                      });
-                  }
-              }
-              // Disconnect this observer since callback is only triggered once.
-              obs.disconnect();
-              // }).observe({ type: 'first-input', buffered: true }); // chrome 79支持type，chrome 70不支持会报错，要用entryTypes
-          }).observe({ entryTypes: ['first-input'] });
-      } catch (e) {}
       if (this.navigationStart) {
-          var hasSendTiming = 0;
           var timingTimer = function timingTimer() {
-              var fcpTimer = setTimeout(function () {
+              var timer = setTimeout(function () {
                   var _performance$timing = performance.timing,
                       fetchStart = _performance$timing.fetchStart,
                       connectStart = _performance$timing.connectStart,
@@ -971,8 +925,7 @@
                       domLoading = _performance$timing.domLoading,
                       domContentLoadedEventStart = _performance$timing.domContentLoadedEventStart;
 
-                  if (!hasSendTiming && domContentLoadedEventStart) {
-                      hasSendTiming = 1;
+                  if (domContentLoadedEventStart) {
                       FEDLOG.send({
                           t1: 'exp',
                           t2: 'timing',
@@ -983,33 +936,62 @@
                           d4: loadEventStart - domContentLoadedEventStart, //DOM渲染
                           d5: connectStart - fetchStart // Appcache + DNS时间
                       });
-                  }
-
-                  var FP = performance.getEntriesByName('first-paint')[0];
-                  var FCP = performance.getEntriesByName('first-contentful-paint')[0];
-
-                  if (window.FEDLOG_TTI) {
-                      var FCPTime = FCP ? formatTime(FCP.startTime) : 0;
-                      var FMPTime = FMP ? formatTime(FMP.startTime) : window.FEDLOG_FMP || 0;
-                      var TTITime = formatTime(window.FEDLOG_TTI > FCPTime ? window.FEDLOG_TTI : FCPTime) || FCPTime;
-
-                      FEDLOG.send({
-                          t1: 'exp',
-                          t2: 'fp',
-                          t3: location.pathname.split("/")[1],
-                          d1: FP ? formatTime(FP.startTime) : 0,
-                          d2: FCPTime,
-                          d3: FMPTime,
-                          d4: TTITime
-                      });
-                      clearTimeout(fcpTimer);
+                      clearTimeout(timer);
                   } else {
+                      clearTimeout(timer);
                       timingTimer();
                   }
               }, 3e3);
           };
           onload(timingTimer);
       }
+  };
+
+  /**
+   * DOMContentLoaded 事件回掉
+   * @param {*} callback function
+   */
+  function domload (callback) {
+      if (document.readyState === 'interactive') {
+          callback();
+      } else {
+          document.addEventListener('DOMContentLoaded', callback);
+      }
+  }
+
+  /**
+   * 通过检查dom元素变化比例来确认是不是内容渲染出来
+   * DOM变化率 > 4
+   */
+  var MutationRadio = 4;
+  FEDLOG.FMP = function () {
+      var MutationObserver = window.MutationObserver || window.WebKitMutationObserver || window.MozMutationObserver;
+      if (!MutationObserver) {
+          return;
+      }
+
+      var changeBaseNum = 0;
+      var begin = Date.now();
+      var observer = new MutationObserver(function (mutationsList) {
+          var mulength = mutationsList.length;
+          if (changeBaseNum > 0 && mulength / changeBaseNum > MutationRadio) {
+              window.FEDLOG_FMP = Date.now() - begin;
+              observer.disconnect();
+          }
+          changeBaseNum = mulength;
+      });
+      domload(function () {
+          var container = document.querySelector("#ice-container") || document.body;
+          observer.observe(container, {
+              attributes: true,
+              childList: true,
+              characterData: true,
+              subtree: true
+          });
+      });
+      setTimeout(function () {
+          observer.disconnect();
+      }, 8e3);
   };
 
   /**
@@ -1028,6 +1010,62 @@
   }
 
   /**
+  element timing: https://chromestatus.com/features/6230814637424640, env: chrome>= 77
+  first-input: https://www.chromestatus.com/features/5149663191629824, env: chrome>= 77
+  first-paint, env: chrome>= 60
+   */
+  FEDLOG.fp = function () {
+      var FMP = 0; //<div elementtiming="hero" class="..." >
+      if (!!window.PerformanceElementTiming) {
+          var entryType = 'element';
+          var observer = new PerformanceObserver(function (list) {
+              var perfEntries = list.getEntries();
+              FMP = perfEntries[0];
+              observer.disconnect();
+          });
+          observer.observe({ entryTypes: [entryType] });
+          watchPageVisiblityChange(function (isVisible) {
+              if (!isVisible) {
+                  observer.disconnect();
+              } else {
+                  requestIdleCallback$1(function () {
+                      observer.observe({ entryTypes: [entryType] });
+                  }, 50);
+              }
+          });
+      }
+      if (this.navigationStart) {
+          var handleFp = function handleFp() {
+              var fcpTimer = setTimeout(function () {
+                  var FP = performance.getEntriesByName('first-paint')[0];
+                  var FCP = performance.getEntriesByName('first-contentful-paint')[0];
+                  if (window.FEDLOG_TTI) {
+                      var FCPTime = FCP ? formatTime(FCP.startTime) : 0;
+                      var FMPTime = FMP ? formatTime(FMP.startTime) : window.FEDLOG_FMP || 0;
+                      var TTITime = formatTime(window.FEDLOG_TTI > FCPTime ? window.FEDLOG_TTI : FCPTime) || FCPTime;
+                      var TBT = window.FEDLOG_TBT ? formatTime(window.FEDLOG_TBT) : 0;
+
+                      FEDLOG.send({
+                          t1: 'exp',
+                          t2: 'fp',
+                          t3: location.pathname.split("/")[1],
+                          d1: FP ? formatTime(FP.startTime) : 0,
+                          d2: FCPTime,
+                          d3: FMPTime,
+                          d4: TTITime,
+                          d5: TBT
+                      });
+                      clearTimeout(fcpTimer);
+                  } else {
+                      handleFp();
+                  }
+              }, 3e3);
+          };
+          onload(handleFp);
+      }
+  };
+
+  /**
    * 卡顿，监控浏览器主进程持续执行时间大于50ms的情况 
    * https://www.w3.org/TR/longtasks/
    * https://www.chromestatus.com/features/5738471184400384
@@ -1038,11 +1076,14 @@
   var MAX_LONG_TASK_PER_PAGE = 100;
   var MIN_LONG_TASK_DURATION = 500;
   var TTI_QUITE_WINDOW = 3000;
+  var TBT_BASE = 50;
   FEDLOG.longTask = function () {
       if (!window.PerformanceLongTaskTiming) {
           return;
       }
       FEDLOG._lastLongtaskSelList = [];
+      window.FEDLOG_TBT = 0;
+
       var timmer,
           mileage = performance.now();
       var observer = new PerformanceObserver(function (list) {
@@ -1053,6 +1094,9 @@
               clearTimeout(timmer);
               timmer = setTimeout(function () {
                   window.FEDLOG_TTI = mileage;
+                  if (entry.duration > TBT_BASE) {
+                      window.FEDLOG_TBT += entry.duration - TBT_BASE;
+                  }
               }, TTI_QUITE_WINDOW);
 
               if (entry.duration > MIN_LONG_TASK_DURATION && FEDLOG._lastLongtaskSelList.length < MAX_LONG_TASK_PER_PAGE) {
@@ -1149,7 +1193,7 @@
                   t3: 'lcp',
                   d1: item.startTime,
                   d2: item.size,
-                  d3: genSelector$1(item.element)
+                  d3: item.element ? genSelector$1(item.element) : ''
               });
           });
       });
@@ -1211,6 +1255,9 @@
   FEDLOG.PV();
 
   FEDLOG.timing();
+
+  FEDLOG.fmp();
+  FEDLOG.fp();
 
   FEDLOG.longTask();
 
